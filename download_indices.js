@@ -3,32 +3,62 @@ const fs = require('fs');
 const request = require('request');
 const { promisify } = require('util');
 const mkdirp = promisify(require('mkdirp'));
-const timeout = ms => new Promise(res => setTimeout(res, ms));
+const PromisePool = require('es6-promise-pool');
 
-async function downloadIndices() {
+async function downloadIndices(concurrency=10) {
     const browser = await puppeteer.launch();
     await mkdirp('data/indices');
 
-    await downloadIndex(browser, {
-        raMin: '00:00:00',
-        raMax: '00:01:00',
-        decMin: '00:00:00',
-        decMax: '12:00:00',
-        type: 'G'
-    });
+    const constraintPermutations = [];
+
+    const types = ['G'];
+    const raMinuteIncrement = 1;
+    const declinationHourIncrement = 12;
+
+    const hourToHMS = (hour) => `${hour}:00:00`;
+    const minuteToHMS = (minute) => `${Math.floor(minute/60)}:${minute % 60}:00`;
+
+    for (let raMinute = 0; raMinute < 24*60; raMinute += raMinuteIncrement) {
+        for (let declinationHour = 0; declinationHour < 24; declinationHour += declinationHourIncrement) {
+            types.forEach((type) => {
+                constraintPermutations.push({
+                    raMin: minuteToHMS(raMinute),
+                    raMax: minuteToHMS(raMinute + raMinuteIncrement),
+                    decMin: hourToHMS(declinationHour),
+                    decMax: hourToHMS(declinationHour + declinationHourIncrement),
+                    type
+                });
+            })
+        }
+    }
+
+    const pool = new PromisePool(() => {
+        if (constraintPermutations.length === 0) {
+            return null;
+        }
+
+        console.log(`${constraintPermutations.length} left`);
+        const constraints = constraintPermutations.shift();
+
+        return downloadIndex(browser, constraints);
+    }, concurrency);
+
+    await pool.start();
 
     await browser.close();
 }
 
 async function downloadIndex(browser, constraints) {
+    const startTime = Date.now();
+
     const name = `${constraints.type}-${constraints.raMin}-${constraints.raMax}-${constraints.decMin}-${constraints.decMax}`.replace(/:/g, '');
     const outputPath = `data/indices/${name}.txt`;
     if (fs.existsSync(outputPath)) {
-        console.log(`Already downloaded ${name}`);
+        console.log(`\t[${name}] Already downloaded`);
         return outputPath;
     }
 
-    console.log(`Downloading ${name}...`);
+    console.log(`\t[${name}] Downloading...`);
     const page = await browser.newPage();
 
     await page.goto('https://ned.ipac.caltech.edu/byparams', { waitUntil: 'networkidle2' });
@@ -38,22 +68,37 @@ async function downloadIndex(browser, constraints) {
     await setTypeConstraints(page, constraints.type);
 
     const whenPageOpened = new Promise((resolve) => {
-        browser.on('targetcreated', async target => {
+        const handleCreation = async function(target) {
+            if (!target.opener()) {
+                return;
+            }
+
+            const opener = await target.opener().page();
+            if (opener !== page) {
+                return;
+            }
+
             const openedPage = await target.page();
-            resolve(openedPage)
-        });
+            resolve(openedPage);
+
+            browser.off('targetcreated', handleCreation);
+        };
+
+        browser.on('targetcreated', handleCreation);
     });
 
     await page.click('#edit-submit');
+    console.log(`\t[${name}] Request dispatched`);
 
     const openedPage = await whenPageOpened;
+    console.log(`\t[${name}] Awaiting job completion (url: ${openedPage.url()})`);
     await page.close(); // we can safely close the opening page
-    console.log(`Request for ${name} dispatched`);
 
-    const url = await getDataUrl(openedPage);
+    const url = await getDataUrl(openedPage, name);
     await downloadData(url, outputPath);
 
-    console.log(`${name} downloaded`);
+    const elapsedTime = Date.now() - startTime;
+    console.log(`\t[${name}] Downloaded in ${Math.round(elapsedTime/1000)}s`);
     return outputPath;
 }
 
@@ -70,8 +115,28 @@ function downloadData(dataUrl, outputPath) {
     })
 }
 
-async function getDataUrl(page) {
-    await page.waitFor('a[target=out]');
+/**
+ * Waits for job completion and then returns the data url
+ *
+ * @param page
+ * @param {String} name
+ * @param {Number} maxAttempts - max number of waitFor timeouts to wait (typically happens within one or two but is poisson distributed)
+ * @return {Promise<String>}
+ */
+async function getDataUrl(page, name, maxAttempts = 120) {
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+            await page.waitFor('a[target=out]');
+        } catch (e) { // odds are chrome just didn't detect it, so check manually
+            console.log(`\t[${name}] Not complete after attempt ${attempt}`);
+            const exists = await page.evaluate(() => !!document.querySelector('a[target=out]'));
+
+            if (!exists && attempt === maxAttempts - 1) {
+                page.screenshot({ path: `data/screenshots/err-${Date.now()}.png`, fullPage: true });
+                throw new Error('Failed to get data url, rip');
+            }
+        }
+    }
     return await page.evaluate(() => document.querySelector('a[target=out]').href);
 }
 
@@ -86,6 +151,14 @@ async function getDataUrl(page) {
  * @return {Promise<*>}
  */
 async function setSkyAreaConstraints(page, { raMin, raMax, decMin, decMax }) {
+    if (raMax === '24:00:00') {
+        raMax = '23:59:59';
+    }
+
+    if (decMax === '24:00:00') {
+        decMax = '23:59:59';
+    }
+
     await page.click('#bt');
     await page.select('#edit-rarange', 'Between');
     await page.select('#edit-decrange', 'Between');
