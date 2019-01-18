@@ -24,25 +24,57 @@ async function getImagesFor(objectID, browser) {
     const url = `https://ned.ipac.caltech.edu/byname?objname=${encodeURIComponent(objectID)}&hconst=67.8&omegam=0.308&omegav=0.692&wmap=4&corr_z=1`;
 
     await page.goto(url, { waitUntil: 'networkidle2' });
-    await page.pdf({ path: 'data/screenshots/page-1.pdf', format: 'A4' });
 
-    await page.click('a#ui-id-7');
-    await page.pdf({ path: 'data/screenshots/page-2.pdf', format: 'A4' });
+    await page.click('a#ui-id-7'); // images tab
 
-    const imageElements = await page.$$('#imagetable img');
-    const imageUrls = (await Promise.all(imageElements.map(imageEl => imageEl.getProperty('src'))))
-        .map(url => url._remoteObject.value);
+    const rows = (await page.$$('#imagetable tr')).slice(2);
+    const imageData = await Promise.all(rows.map(async row => {
+        return await page.evaluate((row) => {
+            const cells = row.querySelectorAll('td');
 
-    const imageDir = `data/images/${objectID}`;
+            return {
+                src: cells[0].querySelector('img').src,
+                fileSize: cells[1].innerText.trim(),
+                information: cells[2].querySelector('a').href,
+                lambda: cells[3].innerText.trim(),
+                clambda: cells[4].innerText.trim(),
+                spectralRegion: cells[5].innerText.trim(),
+                band: cells[6].innerText.trim(),
+                fov1: cells[7].innerText.trim(),
+                fov2: cells[8].innerText.trim(),
+                res: cells[9].innerText.trim(),
+                telescope: cells[10].innerText.trim(),
+                refCode: cells[11].querySelector('a').href
+            };
+        }, row);
+    }));
 
-    await mkdirp(imageDir);
+    const imageUrls = imageData.map(datum => datum.src);
+
+    const objectDir = `data/objects/${objectID}`;
+
+    await mkdirp(objectDir);
 
     imageUrls.forEach((imageURL, i) => {
         request(imageURL).on('response',  function (res) {
             const ending = res.headers['content-type'].split('/')[1];
-            res.pipe(fs.createWriteStream(`${imageDir}/image-${i}.${ending}`));
+            const imageFile = `${objectDir}/image-${i}.${ending}`;
+            res.pipe(fs.createWriteStream(imageFile));
         });
     });
+
+    const metadataFile = `${objectDir}/metadata.json`;
+    let existingData = {};
+    if (fs.existsSync(metadataFile)) {
+        existingData = JSON.parse(await promisify(fs.readFile)(metadataFile));
+    }
+
+    const metadata = Object.assign(existingData, {
+        objectID,
+        images: imageData
+    });
+
+    await promisify(fs.writeFile)(metadataFile, JSON.stringify(metadata, null, 4));
 
     if (createdBrowser) {
         await browser.close();
