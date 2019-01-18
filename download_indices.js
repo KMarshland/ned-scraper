@@ -1,30 +1,78 @@
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const request = require('request');
+const { promisify } = require('util');
+const mkdirp = promisify(require('mkdirp'));
 const timeout = ms => new Promise(res => setTimeout(res, ms));
 
 async function downloadIndices() {
     const browser = await puppeteer.launch();
+    await mkdirp('data/indices');
 
-    const page = await browser.newPage();
-
-    await page.goto('https://ned.ipac.caltech.edu/byparams', { waitUntil: 'networkidle2' });
-    await page.screenshot({ path: 'data/screenshots/page-1.png', fullPage: true });
-
-    await solveCaptcha(page);
-    await page.screenshot({ path: 'data/screenshots/page-2.png', fullPage: true });
-
-    await setSkyAreaConstraints(page, {
+    await downloadIndex(browser, {
         raMin: '00:00:00',
         raMax: '00:01:00',
         decMin: '00:00:00',
         decMax: '12:00:00',
+        type: 'G'
     });
-    await page.screenshot({ path: 'data/screenshots/page-3.png', fullPage: true });
 
-    await setTypeConstraints(page, 'G');
-    await page.screenshot({ path: 'data/screenshots/page-4.png', fullPage: true });
-
-    await page.close();
     await browser.close();
+}
+
+async function downloadIndex(browser, constraints) {
+    const name = `${constraints.type}-${constraints.raMin}-${constraints.raMax}-${constraints.decMin}-${constraints.decMax}`.replace(/:/g, '');
+    const outputPath = `data/indices/${name}.txt`;
+    if (fs.existsSync(outputPath)) {
+        console.log(`Already downloaded ${name}`);
+        return outputPath;
+    }
+
+    console.log(`Downloading ${name}...`);
+    const page = await browser.newPage();
+
+    await page.goto('https://ned.ipac.caltech.edu/byparams', { waitUntil: 'networkidle2' });
+
+    await solveCaptcha(page);
+    await setSkyAreaConstraints(page, constraints);
+    await setTypeConstraints(page, constraints.type);
+
+    const whenPageOpened = new Promise((resolve) => {
+        browser.on('targetcreated', async target => {
+            const openedPage = await target.page();
+            resolve(openedPage)
+        });
+    });
+
+    await page.click('#edit-submit');
+
+    const openedPage = await whenPageOpened;
+    await page.close(); // we can safely close the opening page
+    console.log(`Request for ${name} dispatched`);
+
+    const url = await getDataUrl(openedPage);
+    await downloadData(url, outputPath);
+
+    console.log(`${name} downloaded`);
+    return outputPath;
+}
+
+function downloadData(dataUrl, outputPath) {
+    return new Promise((resolve, reject) => {
+        request(dataUrl)
+            .on('error', reject)
+            .on('response',  function (res) {
+                const dataPipe = fs.createWriteStream(outputPath);
+                res.pipe(dataPipe);
+
+                dataPipe.on('finish', resolve);
+            });
+    })
+}
+
+async function getDataUrl(page) {
+    await page.waitFor('a[target=out]');
+    return await page.evaluate(() => document.querySelector('a[target=out]').href);
 }
 
 /**
