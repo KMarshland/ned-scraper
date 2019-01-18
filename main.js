@@ -1,5 +1,5 @@
-const getImagesFor = require('./get_image');
-const { parseIndexFile } = require('./parse_index');
+const { downloadFromIndexFile } = require('./download_from_index');
+
 (async () => {
-    console.log(await parseIndexFile('data/indices/result.txt'));
+    console.log(await downloadFromIndexFile('data/indices/result.txt'));
 })();

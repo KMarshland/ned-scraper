@@ -10,10 +10,35 @@ const mkdirp = promisify(require('mkdirp'));
  * @param {String} objectID             - object to download images for
  * @param {Object} [browser]            - optional instance of a puppeteer browser to avoid repeated startups
  * @param {Object} [existingMetaData]   - optional object metadata to merge with the image data
+ * @param {String} [debugPrefix]        - optional prefix for debug info
  */
-async function getImagesFor(objectID, { browser, existingMetaData }) {
+async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }) {
     const startTime = Date.now();
-    console.log(`Getting images for ${objectID}...`);
+    debugPrefix = debugPrefix || '';
+    console.log(`${debugPrefix}Getting images for ${objectID}...`);
+
+    const objectDir = `data/objects/${objectID}`;
+    await mkdirp(objectDir);
+    const metadataFile = `${objectDir}/metadata.json`;
+
+    if (fs.existsSync(metadataFile)) {
+        const existingMetadata = JSON.parse(await promisify(fs.readFile)(metadataFile));
+
+        let allDownloaded = true;
+        for (let i = 0; i < existingMetadata.images.length; i++) {
+            allDownloaded = allDownloaded && (
+                fs.existsSync(`${objectDir}/image-${i}.jpeg`) ||
+                fs.existsSync(`${objectDir}/image-${i}.jpg`) ||
+                fs.existsSync(`${objectDir}/image-${i}.png`)
+            );
+            if (!allDownloaded) break;
+        }
+
+        if (allDownloaded) {
+            console.log(`${debugPrefix}Images for ${objectID} (${existingMetadata.images.length} total) already downloaded`);
+            return;
+        }
+    }
 
     const createdBrowser = !browser;
     if (createdBrowser) {
@@ -52,10 +77,6 @@ async function getImagesFor(objectID, { browser, existingMetaData }) {
 
     const imageUrls = imageData.map(datum => datum.src);
 
-    const objectDir = `data/objects/${objectID}`;
-
-    await mkdirp(objectDir);
-
     imageUrls.forEach((imageURL, i) => {
         request(imageURL).on('response',  function (res) {
             const ending = res.headers['content-type'].split('/')[1];
@@ -64,7 +85,6 @@ async function getImagesFor(objectID, { browser, existingMetaData }) {
         });
     });
 
-    const metadataFile = `${objectDir}/metadata.json`;
     const metadata = Object.assign({}, existingMetaData, {
         objectID,
         images: imageData
@@ -77,7 +97,7 @@ async function getImagesFor(objectID, { browser, existingMetaData }) {
     }
 
     const elapsedTime = Date.now() - startTime;
-    console.log(`Finished getting images for ${objectID} (${imageUrls.length} total, ${elapsedTime}ms)`);
+    console.log(`${debugPrefix}Finished getting images for ${objectID} (${imageUrls.length} total, ${elapsedTime}ms)`);
 }
 
 module.exports = getImagesFor;
