@@ -1,18 +1,67 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const request = require('request');
+const process = require('process');
 const { promisify } = require('util');
 const mkdirp = promisify(require('mkdirp'));
 const PromisePool = require('es6-promise-pool');
 
-async function downloadIndices(concurrency=10) {
+// Do we really want _all_ of these?
+const typeToID = {
+    'G': [1,0],
+    'GPair': [1,1],
+    'GTrpl': [1,2],
+    'GGroup': [1,3],
+    'GClstr': [1,4],
+    'QSO': [1,5],
+    'QGroup': [1,6],
+    'G_Lens-Q_Lens': [1,7],
+    'AbLS': [1,8],
+    'EmLS': [1,9],
+
+    'SN': [3,0],
+    'HII': [3,1],
+    'PN': [3,2],
+    'SNR': [3,3],
+    '*Ass': [3,4],
+    '*Cl': [3,5],
+    'MCld': [3,6],
+    'Nova': [3,7],
+    'V*': [3,8],
+    'WR*': [3,9],
+    'C*': [3,10],
+    'PofG': [3,11],
+    'Other': [3,12],
+    '*': [3,13],
+    'Blue*': [3,14],
+    'Red*': [3,15],
+    'Psr': [3,16],
+    'RfN': [3,17],
+    '**': [3,18],
+    'EmObj': [3,19],
+    'Neb': [3,20],
+    'WD': [3,21],
+
+    'RadioS': [2,0],
+    'SmmS': [2,1],
+    'IrS': [2,2],
+    'VisS': [2,3],
+    'UvS': [2,4],
+    'UvES': [2,5],
+    'XrayS': [2,6],
+    'GammaS': [2,7]
+};
+
+async function downloadIndices(concurrency=100) {
+    process.setMaxListeners(concurrency + 10);
+
     const browser = await puppeteer.launch();
     await mkdirp('data/indices');
 
     const constraintPermutations = [];
 
-    const types = ['G'];
-    const raMinuteIncrement = 1;
+    const types = Object.keys(typeToID);
+    const raMinuteIncrement = 2;
     const declinationHourIncrement = 12;
 
     const hourToHMS = (hour) => `${hour}:00:00`;
@@ -40,7 +89,9 @@ async function downloadIndices(concurrency=10) {
         console.log(`${constraintPermutations.length} left`);
         const constraints = constraintPermutations.shift();
 
-        return downloadIndex(browser, constraints);
+        return downloadIndex(browser, constraints).catch((err) => {
+            console.log(err.message);
+        });
     }, concurrency);
 
     await pool.start();
@@ -183,17 +234,6 @@ async function setSkyAreaConstraints(page, { raMin, raMax, decMin, decMax }) {
  */
 async function setTypeConstraints(page, type) {
     await page.click('#bt[tooltip="Include or exclude objects of specified type"]');
-
-    // TODO: there are more here
-    const typeToID = {
-        'G': [1, 0],
-        'GPair': [1, 1],
-        'GTrpl': [1, 2],
-        'GGroup': [1, 3],
-        'GClstr': [1, 4],
-        'QSO': [1, 5],
-        'QGroup': [1, 6]
-    };
 
     if (!typeToID[type]) {
         throw new Error(`Invalid type ${type}`);
