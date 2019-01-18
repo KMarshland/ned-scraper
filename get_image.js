@@ -7,10 +7,11 @@ const mkdirp = promisify(require('mkdirp'));
 /**
  * Downloads the images for a given object, eg 2MASX J06032313+0619195
  *
- * @param {String} objectID     - object to download images for
- * @param {Object} [browser]    - optional instance of a puppeteer browser to avoid repeated startups
+ * @param {String} objectID             - object to download images for
+ * @param {Object} [browser]            - optional instance of a puppeteer browser to avoid repeated startups
+ * @param {Object} [existingMetaData]   - optional object metadata to merge with the image data
  */
-async function getImagesFor(objectID, browser) {
+async function getImagesFor(objectID, { browser, existingMetaData }) {
     const startTime = Date.now();
     console.log(`Getting images for ${objectID}...`);
 
@@ -64,12 +65,7 @@ async function getImagesFor(objectID, browser) {
     });
 
     const metadataFile = `${objectDir}/metadata.json`;
-    let existingData = {};
-    if (fs.existsSync(metadataFile)) {
-        existingData = JSON.parse(await promisify(fs.readFile)(metadataFile));
-    }
-
-    const metadata = Object.assign(existingData, {
+    const metadata = Object.assign({}, existingMetaData, {
         objectID,
         images: imageData
     });

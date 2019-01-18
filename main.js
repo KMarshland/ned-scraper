@@ -1,3 +1,5 @@
 const getImagesFor = require('./get_image');
-
-getImagesFor('2MASX J06032313+0619195');
+const { parseIndexFile } = require('./parse_index');
+(async () => {
+    console.log(await parseIndexFile('data/indices/result.txt'));
+})();
