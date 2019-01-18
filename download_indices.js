@@ -52,11 +52,13 @@ const typeToID = {
     'GammaS': [2,7]
 };
 
+const outputDir = 'data/indices';
+
 async function downloadIndices(concurrency=100) {
     process.setMaxListeners(concurrency + 10);
 
     const browser = await puppeteer.launch();
-    await mkdirp('data/indices');
+    await mkdirp(outputDir);
 
     const constraintPermutations = [];
 
@@ -81,12 +83,14 @@ async function downloadIndices(concurrency=100) {
         }
     }
 
+    const totalPermutations = constraintPermutations.length;
+
     const pool = new PromisePool(() => {
         if (constraintPermutations.length === 0) {
             return null;
         }
 
-        console.log(`${constraintPermutations.length} left`);
+        console.log(`${constraintPermutations.length} left (${totalPermutations-constraintPermutations.length} done out of ${totalPermutations} total)`);
         const constraints = constraintPermutations.shift();
 
         return downloadIndex(browser, constraints).catch((err) => {
@@ -103,10 +107,31 @@ async function downloadIndex(browser, constraints) {
     const startTime = Date.now();
 
     const name = `${constraints.type}-${constraints.raMin}-${constraints.raMax}-${constraints.decMin}-${constraints.decMax}`.replace(/:/g, '');
-    const outputPath = `data/indices/${name}.txt`;
+    const outputPath = `${outputDir}/${name}.txt`;
     if (fs.existsSync(outputPath)) {
         console.log(`\t[${name}] Already downloaded`);
         return outputPath;
+    }
+
+    // check if there's been a request dispatched that we can try
+    const partialPath = `${outputDir}/${name}.request.txt`;
+    if (fs.existsSync(partialPath)) {
+        console.log(`\t[${name}] Dispatched request in earlier run, checking existing request...`);
+        const requestURL = (await promisify(fs.readFile)(partialPath)).toString('utf-8');
+
+        try {
+            const openedPage = await browser.newPage();
+            await openedPage.goto(requestURL, {waitUntil: 'networkidle2'});
+            console.log(`\t[${name}] Awaiting job completion (url: ${openedPage.url()})`);
+            const url = await getDataUrl(openedPage, name);
+            await downloadData(url, outputPath);
+            await promisify(fs.unlink)(partialPath); // clean up partial request
+
+            return outputPath;
+        } catch (e) {
+            await promisify(fs.unlink)(partialPath);
+            console.log(`\t[${name}] Reading from existing request failed`);
+        }
     }
 
     console.log(`\t[${name}] Downloading...`);
@@ -142,11 +167,13 @@ async function downloadIndex(browser, constraints) {
     console.log(`\t[${name}] Request dispatched`);
 
     const openedPage = await whenPageOpened;
+    await promisify(fs.writeFile)(partialPath, openedPage.url());
     console.log(`\t[${name}] Awaiting job completion (url: ${openedPage.url()})`);
     await page.close(); // we can safely close the opening page
 
     const url = await getDataUrl(openedPage, name);
     await downloadData(url, outputPath);
+    await promisify(fs.unlink)(partialPath); // clean up partial request
 
     const elapsedTime = Date.now() - startTime;
     console.log(`\t[${name}] Downloaded in ${Math.round(elapsedTime/1000)}s`);
