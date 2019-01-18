@@ -13,14 +13,17 @@ const mkdirp = promisify(require('mkdirp'));
  * @param {String} [debugPrefix]        - optional prefix for debug info
  */
 async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }) {
+    // debug info
     const startTime = Date.now();
     debugPrefix = debugPrefix || '';
     console.log(`${debugPrefix}Getting images for ${objectID}...`);
 
+    // create directories
     const objectDir = `data/objects/${objectID}`;
     await mkdirp(objectDir);
     const metadataFile = `${objectDir}/metadata.json`;
 
+    // check if it's already been downloaded
     if (fs.existsSync(metadataFile)) {
         const existingMetadata = JSON.parse(await promisify(fs.readFile)(metadataFile));
 
@@ -40,6 +43,7 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
         }
     }
 
+    // go to the right place
     const createdBrowser = !browser;
     if (createdBrowser) {
         browser = await puppeteer.launch();
@@ -53,6 +57,7 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
 
     await page.click('a#ui-id-7'); // images tab
 
+    // extract all the data
     const rows = (await page.$$('#imagetable tr')).slice(2);
     const imageData = await Promise.all(rows.map(async row => {
         return await page.evaluate((row) => {
@@ -75,16 +80,11 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
         }, row);
     }));
 
+    // download all images
     const imageUrls = imageData.map(datum => datum.src);
+    await Promise.all(imageUrls.map((imageURL, i) => downloadImage(imageURL, objectDir, i)));
 
-    imageUrls.forEach((imageURL, i) => {
-        request(imageURL).on('response',  function (res) {
-            const ending = res.headers['content-type'].split('/')[1];
-            const imageFile = `${objectDir}/image-${i}.${ending}`;
-            res.pipe(fs.createWriteStream(imageFile));
-        });
-    });
-
+    // store metadata
     const metadata = Object.assign({}, existingMetaData, {
         objectID,
         images: imageData
@@ -92,12 +92,30 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
 
     await promisify(fs.writeFile)(metadataFile, JSON.stringify(metadata, null, 4));
 
+    // clean up
+    await page.close();
+
     if (createdBrowser) {
         await browser.close();
     }
 
     const elapsedTime = Date.now() - startTime;
     console.log(`${debugPrefix}Finished getting images for ${objectID} (${imageUrls.length} total, ${elapsedTime}ms)`);
+}
+
+function downloadImage(imageURL, objectDir, i) {
+    return new Promise((resolve, reject) => {
+        request(imageURL)
+            .on('error', reject)
+            .on('response',  function (res) {
+                const ending = res.headers['content-type'].split('/')[1];
+                const imageFile = `${objectDir}/image-${i}.${ending}`;
+                const imagePipe = fs.createWriteStream(imageFile);
+                res.pipe(imagePipe);
+
+                imagePipe.on('finish', resolve);
+            });
+    })
 }
 
 module.exports = getImagesFor;
