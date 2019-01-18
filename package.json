@@ -1,0 +1,10 @@
+{
+  "name": "ned-scraper",
+  "version": "1.0.0",
+  "main": "main.js",
+  "author": "Kai Marshland <kaimarshland@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "puppeteer": "^1.11.0"
+  }
+}
