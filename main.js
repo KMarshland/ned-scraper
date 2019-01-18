@@ -1,5 +1,5 @@
-const { downloadFromIndexFile } = require('./download_from_index');
+const downloadIndices = require('./download_indices');
 
 (async () => {
-    console.log(await downloadFromIndexFile('data/indices/result.txt'));
+    console.log(await downloadIndices());
 })();
