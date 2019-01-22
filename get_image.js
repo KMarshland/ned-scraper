@@ -57,32 +57,50 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
 
     await page.click('a#ui-id-7'); // images tab
 
+    const navigationTime = Date.now() - startTime;
+
     // extract all the data
     const rows = (await page.$$('#imagetable tr')).slice(2);
-    const imageData = await Promise.all(rows.map(async row => {
-        return await page.evaluate((row) => {
-            const cells = row.querySelectorAll('td');
+    const imageData = (await Promise.all([
+            page.evaluate(() => {
+                return {
+                    src: document.querySelector('#IRSA-Finderchart img').src
+                };
+            }),
+            ...rows.map(async row => {
+                return await page.evaluate((row) => {
+                    const cells = row.querySelectorAll('td');
 
-            return {
-                src: cells[0].querySelector('img').src,
-                fileSize: cells[1].innerText.trim(),
-                information: cells[2].querySelector('a').href,
-                lambda: cells[3].innerText.trim(),
-                clambda: cells[4].innerText.trim(),
-                spectralRegion: cells[5].innerText.trim(),
-                band: cells[6].innerText.trim(),
-                fov1: cells[7].innerText.trim(),
-                fov2: cells[8].innerText.trim(),
-                res: cells[9].innerText.trim(),
-                telescope: cells[10].innerText.trim(),
-                refCode: cells[11].querySelector('a').href
-            };
-        }, row);
-    }));
+                    if (!cells[0].querySelector('img')) {
+                        return null;
+                    }
+
+                    return {
+                        src: cells[0].querySelector('img').src,
+                        fileSize: cells[1].innerText.trim(),
+                        information: cells[2].querySelector('a').href,
+                        lambda: cells[3].innerText.trim(),
+                        clambda: cells[4].innerText.trim(),
+                        spectralRegion: cells[5].innerText.trim(),
+                        band: cells[6].innerText.trim(),
+                        fov1: cells[7].innerText.trim(),
+                        fov2: cells[8].innerText.trim(),
+                        res: cells[9].innerText.trim(),
+                        telescope: cells[10].innerText.trim(),
+                        refCode: cells[11].querySelector('a').href
+                    };
+                }, row);
+            })
+        ])
+    ).filter((value) => !!value);
+
+    const extractionTime = Date.now() - startTime - navigationTime;
 
     // download all images
     const imageUrls = imageData.map(datum => datum.src);
     await Promise.all(imageUrls.map((imageURL, i) => downloadImage(imageURL, objectDir, i)));
+
+    const downloadTime = Date.now() - startTime - navigationTime - extractionTime;
 
     // store metadata
     const metadata = Object.assign({}, existingMetaData, {
@@ -100,7 +118,7 @@ async function getImagesFor(objectID, { browser, existingMetaData, debugPrefix }
     }
 
     const elapsedTime = Date.now() - startTime;
-    console.log(`${debugPrefix}Finished getting images for ${objectID} (${imageUrls.length} total, ${elapsedTime}ms)`);
+    console.log(`${debugPrefix}Finished getting images for ${objectID} (${imageUrls.length} total, ${elapsedTime}ms ${navigationTime}/${extractionTime}/${downloadTime})`);
 }
 
 function downloadImage(imageURL, objectDir, i) {

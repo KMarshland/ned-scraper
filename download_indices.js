@@ -90,7 +90,7 @@ async function downloadIndices(concurrency=100) {
             return null;
         }
 
-        console.log(`${constraintPermutations.length} left (${totalPermutations-constraintPermutations.length} done out of ${totalPermutations} total)`);
+        console.log(`[${new Date().toLocaleString()}] ${constraintPermutations.length} left (${totalPermutations-constraintPermutations.length} done out of ${totalPermutations} total)`);
         const constraints = constraintPermutations.shift();
 
         return downloadIndex(browser, constraints).catch((err) => {
@@ -289,5 +289,10 @@ async function solveCaptcha(page) {
         return answer;
     });
 }
+
+(async () => {
+    const concurrency = process.argv.length >= 3 ? parseInt(process.argv[2]) : undefined;
+    await downloadIndices(concurrency);
+})();
 
 module.exports = downloadIndices;
