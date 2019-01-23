@@ -1,3 +1,5 @@
+const fs = require('fs');
+const { promisify } = require('util');
 const puppeteer = require('puppeteer');
 const PromisePool = require('es6-promise-pool');
 const { parseIndexFile, parseIndex } = require('./parse_index');
@@ -47,6 +49,8 @@ async function downloadIndexObject(index, concurrency=5) {
 
     const elapsedTime = Date.now() - startTime;
     console.log(`Downloaded images for ${index.length} objects in ${Math.round(elapsedTime/1000)}s`);
+
+    return index.length;
 }
 
 (async () => {
@@ -55,6 +59,23 @@ async function downloadIndexObject(index, concurrency=5) {
     }
 
     const concurrency = process.argv.length >= 4 ? parseInt(process.argv[3]) : undefined;
+
+    if (process.argv[2] === 'all') {
+        const indexDir = 'data/indices';
+        const indices = (await promisify(fs.readdir)(indexDir)).filter((filename) => {
+            return /\.txt$/.test(filename) && !/\.request\.txt$/.test(filename);
+        }).map((filename) => indexDir + '/' + filename);
+
+        console.log(`Downloading all objects from ${indices.length} index files`);
+        let downloadCount = 0;
+        for (let i = 0; i < indices.length; i++) {
+            console.log(`[${new Date().toLocaleString()}] ${downloadCount} complete (out of ${Math.round(indices.length/1000)} million estimated); starting ${indices[i]}`);
+            downloadCount += await downloadFromIndexFile(indices[i], concurrency);
+        }
+
+        return;
+    }
+
     await downloadFromIndexFile(process.argv[2], concurrency);
 })();
 

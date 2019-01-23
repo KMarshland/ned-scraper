@@ -43,6 +43,10 @@ function parseIndex(indexText) {
         'Associations': 'associations'
     };
 
+    if (lines.length === 0) {
+        return [];
+    }
+
     const header = lines[0].split('|').map((part) => {
         return fixedNames[part] || part;
     });
