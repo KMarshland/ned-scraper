@@ -81,7 +81,14 @@ async function downloadIndexObject(index, concurrency=5, guessSource=false) {
         let downloadCount = 0;
         for (let i = 0; i < indices.length; i++) {
             console.log(`[${new Date().toLocaleString()}] ${downloadCount} complete (out of ${Math.round(indices.length/1000)} million estimated); starting ${indices[i]}`);
-            downloadCount += await downloadFromIndexFile(indices[i], concurrency, guessSource);
+
+            try {
+                downloadCount += await downloadFromIndexFile(indices[i], concurrency, guessSource);
+            } catch (e) { // prevent errors from being fatal
+                setTimeout(() => {
+                    throw e;
+                });
+            }
         }
 
         return;

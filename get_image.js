@@ -154,6 +154,11 @@ function downloadImage(imageURL, objectDir, i) {
         request(imageURL)
             .on('error', reject)
             .on('response',  function (res) {
+                if (!res.headers['content-type']) {
+                    reject('No content type header -- image likely does not exist');
+                    return;
+                }
+
                 const ending = res.headers['content-type'].split('/')[1];
                 const imageFile = `${objectDir}/image-${i}.${ending}`;
                 const imagePipe = fs.createWriteStream(imageFile);
